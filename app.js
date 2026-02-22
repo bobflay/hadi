@@ -29,9 +29,17 @@ function generateMockData() {
                 const baseForecast = 10000 + Math.random() * 5000;
                 const forecast = Math.round(baseForecast * seasonFactor);
 
+                // Quantité prévue (en unités)
+                const baseForecastQty = 200 + Math.random() * 300;
+                const forecastQuantity = Math.round(baseForecastQty * seasonFactor);
+
                 // Ventes réelles avec écart de ~25% inférieur aux prévisions
                 const varianceFactor = 0.70 + Math.random() * 0.10; // Entre 70% et 80% (moyenne ~75%)
                 const actual = Math.round(forecast * varianceFactor);
+
+                // Quantité réelle (avec un écart similaire)
+                const qtyVarianceFactor = 0.72 + Math.random() * 0.12;
+                const actualQuantity = Math.round(forecastQuantity * qtyVarianceFactor);
 
                 // Indice de prix (100 = base, simuler des changements de prix)
                 const priceIndex = 100 + (i < 30 ? 5 : 0) + (Math.random() - 0.5) * 10;
@@ -58,7 +66,9 @@ function generateMockData() {
                     category,
                     supplier,
                     forecast,
+                    forecastQuantity,
                     actual,
+                    actualQuantity,
                     priceIndex: Math.round(priceIndex * 10) / 10,
                     stockouts,
                     returnsRate: Math.round(returnsRate * 1000) / 1000,
@@ -141,6 +151,10 @@ function calculateKPIs(data) {
         return {
             totalForecast: 0,
             totalActual: 0,
+            totalForecastQuantity: 0,
+            totalActualQuantity: 0,
+            forecastValuePerQuantity: 0,
+            actualValuePerQuantity: 0,
             forecastAccuracy: 0,
             variance: 0,
             variancePercent: 0,
@@ -155,6 +169,10 @@ function calculateKPIs(data) {
 
     const totalForecast = data.reduce((sum, d) => sum + d.forecast, 0);
     const totalActual = data.reduce((sum, d) => sum + d.actual, 0);
+    const totalForecastQuantity = data.reduce((sum, d) => sum + d.forecastQuantity, 0);
+    const totalActualQuantity = data.reduce((sum, d) => sum + d.actualQuantity, 0);
+    const forecastValuePerQuantity = totalForecastQuantity > 0 ? totalForecast / totalForecastQuantity : 0;
+    const actualValuePerQuantity = totalActualQuantity > 0 ? totalActual / totalActualQuantity : 0;
     const variance = totalActual - totalForecast;
     const variancePercent = totalForecast > 0 ? (variance / totalForecast) * 100 : 0;
 
@@ -194,6 +212,10 @@ function calculateKPIs(data) {
     return {
         totalForecast,
         totalActual,
+        totalForecastQuantity,
+        totalActualQuantity,
+        forecastValuePerQuantity,
+        actualValuePerQuantity,
         forecastAccuracy,
         variance,
         variancePercent,
@@ -212,7 +234,9 @@ function getCategoryVariance(data) {
     categories.forEach(cat => {
         byCategory[cat] = {
             forecast: 0,
+            forecastQuantity: 0,
             actual: 0,
+            actualQuantity: 0,
             stockouts: 0,
             onTimeTotal: 0,
             count: 0
@@ -221,7 +245,9 @@ function getCategoryVariance(data) {
 
     data.forEach(d => {
         byCategory[d.category].forecast += d.forecast;
+        byCategory[d.category].forecastQuantity += d.forecastQuantity;
         byCategory[d.category].actual += d.actual;
+        byCategory[d.category].actualQuantity += d.actualQuantity;
         byCategory[d.category].stockouts += d.stockouts;
         byCategory[d.category].onTimeTotal += d.onTimeRate;
         byCategory[d.category].count++;
@@ -231,6 +257,8 @@ function getCategoryVariance(data) {
         category,
         forecast: stats.forecast,
         actual: stats.actual,
+        forecastValuePerQty: stats.forecastQuantity > 0 ? stats.forecast / stats.forecastQuantity : 0,
+        actualValuePerQty: stats.actualQuantity > 0 ? stats.actual / stats.actualQuantity : 0,
         variance: stats.actual - stats.forecast,
         variancePercent: stats.forecast > 0 ? ((stats.actual - stats.forecast) / stats.forecast) * 100 : 0,
         stockouts: stats.stockouts,
@@ -656,9 +684,21 @@ function updateKPIs(kpis) {
     const forecastCard = document.getElementById('kpi-forecast');
     forecastCard.querySelector('.kpi-value').textContent = formatCurrency(kpis.totalForecast);
 
+    // Valeur/Quantité Prévision
+    const forecastVpqCard = document.getElementById('kpi-forecast-vpq');
+    forecastVpqCard.querySelector('.kpi-value').textContent = kpis.forecastValuePerQuantity.toFixed(2) + ' €';
+    forecastVpqCard.querySelector('.kpi-subtext').textContent = formatNumber(kpis.totalForecastQuantity) + ' unités prévues';
+
     // Réalisé Total
     const actualCard = document.getElementById('kpi-actual');
     actualCard.querySelector('.kpi-value').textContent = formatCurrency(kpis.totalActual);
+
+    // Valeur/Quantité Réalisé
+    const actualVpqCard = document.getElementById('kpi-actual-vpq');
+    actualVpqCard.querySelector('.kpi-value').textContent = kpis.actualValuePerQuantity.toFixed(2) + ' €';
+    actualVpqCard.querySelector('.kpi-subtext').textContent = formatNumber(kpis.totalActualQuantity) + ' unités vendues';
+    const vpqVariance = kpis.actualValuePerQuantity - kpis.forecastValuePerQuantity;
+    actualVpqCard.className = 'kpi-card ' + (vpqVariance >= 0 ? 'positive' : 'negative');
 
     // Précision des Prévisions
     const accuracyCard = document.getElementById('kpi-accuracy');
@@ -748,7 +788,7 @@ function updateVarianceTable(data) {
     const tbody = document.getElementById('varianceTableBody');
 
     if (negativeVariance.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #10b981;">Toutes les catégories ont un écart positif ou nul</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #10b981;">Toutes les catégories ont un écart positif ou nul</td></tr>';
         return;
     }
 
@@ -756,7 +796,9 @@ function updateVarianceTable(data) {
         <tr>
             <td>${cat.category}</td>
             <td>${formatCurrency(cat.forecast)}</td>
+            <td>${cat.forecastValuePerQty.toFixed(2)} €</td>
             <td>${formatCurrency(cat.actual)}</td>
+            <td>${cat.actualValuePerQty.toFixed(2)} €</td>
             <td class="negative">${formatCurrency(cat.variance)}</td>
             <td class="negative">${cat.variancePercent.toFixed(1)}%</td>
             <td class="${cat.stockouts > 10 ? 'warning' : ''}">${cat.stockouts}</td>
