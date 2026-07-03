@@ -18,6 +18,21 @@
 
     <!-- INTERFACE (HUD) -->
     <div id="hud">
+        <!-- Logo / identité -->
+        <div id="logo" class="logo">
+            <span class="logo-emoji">🍫</span>
+            <div class="logo-txt">
+                <span class="logo-name">Or Brun</span>
+                <span class="logo-tag">La filière tracée</span>
+            </div>
+        </div>
+
+        <!-- Bulle de commande exportateur -->
+        <div id="orderBubble" class="order-bubble hidden">
+            <div class="ob-title">🚛 Exportateur</div>
+            <div class="ob-body" id="obBody">Cacao tracé : 0 / 0 kg</div>
+        </div>
+
         <!-- Barre du haut : ressources -->
         <div class="top-bar">
             <div class="resource"><span class="res-icon">🍫</span><span class="res-value" id="cacaoValue">0</span><span class="res-label">kg cacao</span></div>
@@ -90,7 +105,13 @@
     <!-- Écran de démarrage -->
     <div id="startScreen">
         <div class="start-card">
-            <h1>🍫 Cacao Traçabilité</h1>
+            <div class="start-logo">
+                <span class="start-emoji">🍫</span>
+                <div class="start-logo-txt">
+                    <span class="start-name">Or Brun</span>
+                    <span class="start-tag">La filière cacao tracée</span>
+                </div>
+            </div>
             <p class="subtitle">Système National de Traçabilité — Conseil du Café-Cacao 🇨🇮</p>
             <p>Géolocalise ta parcelle, obtiens ta <strong>Carte du Producteur</strong>, récolte le cacao et vends-le en <strong>vente tracée</strong> à la coopérative — de la plantation jusqu'à l'usine.</p>
             <button id="startBtn">▶ Commencer</button>

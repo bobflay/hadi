@@ -245,6 +245,8 @@ function makeCoop(x, z) {
 
 makeCccDesk(10, -4);
 makeCoop(9, 7);
+const cccPos = new THREE.Vector3(10, 0, -4);
+const coopPos = new THREE.Vector3(9, 0, 7);
 
 /* ---------- Décor ---------- */
 function makeFencePost(x, z) {
@@ -265,6 +267,35 @@ function makeDecoTree(x, z) {
     scene.add(g);
 }
 makeDecoTree(16, 13); makeDecoTree(-20, 12); makeDecoTree(15, -20);
+
+/* ---------- Camion de l'exportateur (demande + vie du monde) ---------- */
+const truck = new THREE.Group();
+truck.position.set(15, 0, 10);
+truck.rotation.y = -Math.PI / 4;
+const truckBaseY = truck.position.y;
+{
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.55 });
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.8, 1.9), bodyMat);
+    bed.position.set(-0.7, 0.95, 0); bed.castShadow = true; truck.add(bed);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.0, 1.9), bodyMat);
+    cab.position.set(1.1, 1.0, 0); cab.castShadow = true; truck.add(cab);
+    const window_ = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 1.7),
+        new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+    window_.position.set(1.15, 1.7, 0); truck.add(window_);
+    // Cargaison : sacs tracés
+    const sackMat = new THREE.MeshStandardMaterial({ color: 0xcaa472, roughness: 1 });
+    [[-1.1, -0.4], [-1.1, 0.4], [-0.4, 0]].forEach(([sx, sz]) => {
+        const s = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.35, 4, 6), sackMat);
+        s.position.set(sx, 1.6, sz); s.castShadow = true; truck.add(s);
+    });
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111827 });
+    [[-1.3, 0.95], [-1.3, -0.95], [1.0, 0.95], [1.0, -0.95]].forEach(([wx, wz]) => {
+        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 12), wheelMat);
+        w.rotation.x = Math.PI / 2; w.position.set(wx, 0.42, wz); w.castShadow = true; truck.add(w);
+    });
+}
+scene.add(truck);
+let truckPop = 0;
 
 /* ---------- Personnage ---------- */
 const player = new THREE.Group();
@@ -371,6 +402,8 @@ function doAction() {
 function harvestFrom(tree) {
     const pod = tree.pods.find(p => p.ripe);
     if (!pod) return;
+    const wp = new THREE.Vector3(); pod.mesh.getWorldPosition(wp);
+    spawnFlyer(wp); sfx.pluck();
     pod.ripe = false; pod.mesh.visible = false; pod.regrowAt = clockTime + 6;
     const kg = Math.round(HARVEST_MIN_KG + Math.random() * (HARVEST_MAX_KG - HARVEST_MIN_KG));
     state.cacaoKg += kg;
@@ -388,20 +421,23 @@ function cccAction() {
     if (state.cardBalance > 0) {
         const amount = state.cardBalance;
         state.mobileMoney += amount; state.cardBalance = 0;
-        updateHUD();
+        updateHUD(); sfx.coin();
         floaty(`→ 📱 +${formatFCFA(amount, false)}`, 0xea8a00);
     } else {
+        sfx.error();
         floaty('Solde Carte vide', 0x6b7280);
     }
 }
 
 function issueCard() {
     if (!state.plotRegistered) {
+        sfx.error();
         showInfo('🛰️', 'Parcelle non enregistrée',
             "Tu dois d'abord géolocaliser ta parcelle en longeant les 4 bornes. " +
             "La Carte du Producteur est délivrée après le recensement de ton verger.");
         return;
     }
+    sfx.card();
     state.hasCard = true;
     state.zone = ZONES[Math.floor(Math.random() * ZONES.length)];
     state.matricule = 'CCC-' + state.zone.slice(0, 3).toUpperCase() + '-' +
@@ -423,11 +459,13 @@ const saleResult = document.getElementById('saleResult');
 
 async function tracedSale() {
     if (!state.hasCard) {
+        sfx.error();
         showInfo('💳', 'Carte requise',
             "La vente tracée exige la Carte du Producteur. Passe au Guichet CCC pour la retirer.");
         return;
     }
     if (state.cacaoKg <= 0) {
+        sfx.error();
         showInfo('🍫', 'Aucune fève à vendre',
             "Récolte d'abord du cacao dans ta parcelle, puis reviens vendre à la coopérative.");
         return;
@@ -460,12 +498,14 @@ async function tracedSale() {
         await wait(520);
         li.classList.remove('active'); li.classList.add('done');
         li.textContent = li.textContent.split(' — ')[0] + ' — ' + detail[li.dataset.k];
+        if (li.dataset.k === 'pay') sfx.coin(); else sfx.tick();
     }
 
     // Appliquer les effets
     state.cacaoKg = 0;
     state.cardBalance += amount;
     addScore(20);
+    addTracedToOrder(kg);
     updateHUD();
     saleResult.textContent = `✅ Vente tracée : +${formatFCFA(amount)}`;
 
@@ -490,6 +530,7 @@ function registerPlot() {
     state.plotRegistered = true;
     drawPlotPolygon();
     addScore(30);
+    sfx.success();
     showInfo('🛰️', 'Parcelle géolocalisée',
         "Les 4 bornes tracent le polygone de ta parcelle. À l'échelle nationale, le Conseil du Café-Cacao " +
         "a géolocalisé ~3 millions d'hectares de vergers. Cette carte prouve que ton cacao est « zéro déforestation » " +
@@ -531,6 +572,8 @@ function advanceStep() {
     state.step = state.step >= 4 ? 0 : state.step + 1;
     updateObjective();
     objectiveEl.classList.remove('pop'); void objectiveEl.offsetWidth; objectiveEl.classList.add('pop');
+    // Fin du tutoriel → la demande de l'exportateur démarre
+    if (state.step === 0 && !state.order.active) activateOrder(120);
 }
 
 /* ---------- HUD ---------- */
@@ -539,11 +582,17 @@ const cardValueEl = document.getElementById('cardValue');
 const moneyValueEl = document.getElementById('moneyValue');
 const scoreValueEl = document.getElementById('scoreValue');
 
-function updateHUD() {
-    cacaoValueEl.textContent = state.cacaoKg;
-    cardValueEl.textContent = formatFCFA(state.cardBalance, false);
-    moneyValueEl.textContent = formatFCFA(state.mobileMoney, false);
-    scoreValueEl.textContent = state.score;
+const disp = { cacaoKg: 0, cardBalance: 0, mobileMoney: 0, score: 0 };
+function updateHUD() { /* les valeurs sont animées dans tickHUD() */ }
+function tickHUD(dt) {
+    for (const k of ['cacaoKg', 'cardBalance', 'mobileMoney', 'score']) {
+        if (Math.abs(disp[k] - state[k]) < 1) disp[k] = state[k];
+        else disp[k] += (state[k] - disp[k]) * Math.min(1, dt * 10);
+    }
+    cacaoValueEl.textContent = Math.round(disp.cacaoKg);
+    cardValueEl.textContent = formatFCFA(disp.cardBalance, false);
+    moneyValueEl.textContent = formatFCFA(disp.mobileMoney, false);
+    scoreValueEl.textContent = Math.round(disp.score);
 }
 function addScore(n) { state.score += n; }
 
@@ -605,6 +654,117 @@ function worldToScreen(v3) {
 }
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
+/* ---------- Audio (WebAudio, autonome) ---------- */
+let actx = null;
+function initAudio() { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* silencieux */ } }
+function beep(freq, dur = 0.12, type = 'sine', vol = 0.2, when = 0) {
+    if (!actx) return;
+    const t = actx.currentTime + when;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.value = freq;
+    o.connect(g); g.connect(actx.destination);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    o.start(t); o.stop(t + dur);
+}
+const sfx = {
+    pluck: () => beep(680, 0.09, 'triangle', 0.16),
+    collect: () => beep(920, 0.07, 'sine', 0.1),
+    card: () => { beep(523, 0.12, 'sine', 0.18); beep(784, 0.16, 'sine', 0.18, 0.1); },
+    coin: () => { beep(988, 0.06, 'square', 0.1); beep(1319, 0.1, 'square', 0.1, 0.06); },
+    success: () => { beep(523, 0.12, 'sine', 0.2); beep(659, 0.12, 'sine', 0.2, 0.1); beep(988, 0.2, 'sine', 0.2, 0.22); },
+    error: () => beep(150, 0.25, 'sawtooth', 0.16),
+    tick: () => beep(560, 0.05, 'sine', 0.07),
+};
+
+/* ---------- Fèves volantes (juice de récolte) ---------- */
+const flyers = [];
+const beanGeo = new THREE.SphereGeometry(0.16, 8, 8);
+const beanMat = new THREE.MeshStandardMaterial({ color: 0x7b3f00 });
+function spawnFlyer(worldPos) {
+    const m = new THREE.Mesh(beanGeo, beanMat);
+    m.position.copy(worldPos); scene.add(m);
+    flyers.push({ mesh: m, t: 0, from: worldPos.clone() });
+}
+
+/* ---------- Flèche + chemin de guidage ---------- */
+const guideArrow = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 1.1, 4),
+    new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x0e7490, emissiveIntensity: 0.6 }));
+guideArrow.rotation.x = Math.PI;
+guideArrow.visible = false;
+scene.add(guideArrow);
+const guideLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineDashedMaterial({ color: 0x22d3ee, dashSize: 0.55, gapSize: 0.4 }));
+guideLine.visible = false;
+scene.add(guideLine);
+
+function nearestRipeTree() {
+    let t = null, bd = Infinity;
+    for (const tr of cacaoTrees)
+        if (tr.pods.some(p => p.ripe)) {
+            const d = player.position.distanceTo(tr.position);
+            if (d < bd) { bd = d; t = tr.position; }
+        }
+    return t;
+}
+function objectiveTarget() {
+    if (state.step === 1) {
+        let t = null, bd = Infinity;
+        for (const b of bornes) if (!b.visited) {
+            const d = player.position.distanceTo(b.position);
+            if (d < bd) { bd = d; t = b.position; }
+        }
+        return t;
+    }
+    if (state.step === 2) return cccPos;
+    if (state.step === 3) return nearestRipeTree();
+    if (state.step === 4) return coopPos;
+    if (state.order && state.order.active && !state.order.done)
+        return state.cacaoKg > 0 ? coopPos : nearestRipeTree();
+    return null;
+}
+
+/* ---------- Commande exportateur ---------- */
+const orderBubble = document.getElementById('orderBubble');
+const obBody = document.getElementById('obBody');
+state.order = { target: 0, progress: 0, active: false, done: false };
+let orderFirstDone = false;
+
+function activateOrder(target) {
+    state.order = { target, progress: 0, active: true, done: false };
+    orderBubble.classList.remove('hidden', 'done');
+    updateOrderBubble();
+}
+function updateOrderBubble() {
+    obBody.textContent = `Cacao tracé : ${state.order.progress} / ${state.order.target} kg`;
+}
+function addTracedToOrder(kg) {
+    if (!state.order.active || state.order.done) return;
+    state.order.progress += kg;
+    updateOrderBubble();
+    if (state.order.progress >= state.order.target) completeOrder();
+}
+function completeOrder() {
+    state.order.done = true;
+    const bonus = 50000;
+    state.cardBalance += bonus;
+    addScore(40);
+    sfx.success();
+    truckPop = 1;
+    orderBubble.classList.add('done');
+    obBody.textContent = `Livré ✓  +${formatFCFA(bonus)}`;
+    if (!orderFirstDone) {
+        orderFirstDone = true;
+        showInfo('🚛', 'Commande exportateur livrée',
+            "L'exportateur n'accepte que du cacao tracé et « zéro déforestation » : c'est la clé de l'accès " +
+            "au marché européen (EUDR). Ta traçabilité complète a permis d'exporter ce lot, et une prime a été " +
+            "versée sur ta Carte. Continue à livrer des lots tracés !");
+    }
+    setTimeout(() => activateOrder(Math.round(state.order.target * 1.5)), 2600);
+}
+
 /* ---------- Boucle ---------- */
 const clock = new THREE.Clock();
 let clockTime = 0, walkPhase = 0;
@@ -645,6 +805,7 @@ function animate() {
                 b.visited = true;
                 b.flag.material.color.set(0x22c55e); // rouge → vert
                 state.bornesVisited++;
+                sfx.coin();
                 floaty(`Borne ${state.bornesVisited}/4 ✓`, 0x22d3ee);
                 if (state.step === 1) updateObjective();
                 if (state.bornesVisited === 4) registerPlot();
@@ -657,8 +818,48 @@ function animate() {
         for (const pod of tree.pods)
             if (!pod.ripe && clockTime >= pod.regrowAt) { pod.ripe = true; pod.mesh.visible = true; }
 
+    // Fèves volantes vers le joueur
+    for (let i = flyers.length - 1; i >= 0; i--) {
+        const f = flyers[i];
+        f.t += dt / 0.45;
+        const to = new THREE.Vector3(player.position.x, 1.4, player.position.z);
+        f.mesh.position.lerpVectors(f.from, to, Math.min(1, f.t));
+        f.mesh.scale.setScalar(1 - 0.6 * Math.min(1, f.t));
+        if (f.t >= 1) { scene.remove(f.mesh); flyers.splice(i, 1); sfx.collect(); }
+    }
+
     // Drapeaux face caméra
     for (const b of bornes) b.flag.lookAt(camera.position);
+
+    // Camion : léger balancement + pop de livraison
+    truck.position.y = truckBaseY + Math.sin(clockTime * 1.6) * 0.03;
+    if (truckPop > 0.001) { truckPop *= 0.9; truck.scale.setScalar(1 + 0.15 * truckPop); }
+    else truck.scale.setScalar(1);
+
+    // Flèche + chemin de guidage vers l'objectif courant
+    const target = (state.started && !state.busy) ? objectiveTarget() : null;
+    if (target && player.position.distanceTo(target) > 3.2) {
+        guideArrow.visible = true;
+        guideArrow.position.set(target.x, 3.2 + Math.sin(clockTime * 3) * 0.25, target.z);
+        guideArrow.rotation.y += dt * 2;
+        guideLine.visible = true;
+        guideLine.geometry.setFromPoints([
+            new THREE.Vector3(player.position.x, 0.3, player.position.z),
+            new THREE.Vector3(target.x, 0.3, target.z)]);
+        guideLine.computeLineDistances();
+    } else { guideArrow.visible = false; guideLine.visible = false; }
+
+    // Bulle de commande au-dessus du camion
+    if (state.started && !state.busy && state.order.active) {
+        const s = worldToScreen(new THREE.Vector3(truck.position.x, 3.4, truck.position.z));
+        orderBubble.style.left = s.x + 'px';
+        orderBubble.style.top = s.y + 'px';
+        orderBubble.classList.remove('hidden');
+    } else {
+        orderBubble.classList.add('hidden');
+    }
+
+    tickHUD(dt);
 
     camera.position.copy(player.position).add(CAM_OFFSET);
     camera.lookAt(player.position.x, 1, player.position.z);
@@ -671,6 +872,7 @@ animate();
 /* ---------- Démarrage ---------- */
 const startScreen = document.getElementById('startScreen');
 document.getElementById('startBtn').addEventListener('click', () => {
+    initAudio();
     state.started = true;
     startScreen.classList.add('hidden');
     updateHUD(); updateObjective();
@@ -684,4 +886,6 @@ window.__dbg = () => ({
     step: state.step, bornes: state.bornesVisited, plot: state.plotRegistered,
     card: state.hasCard, cacaoKg: state.cacaoKg, cardBalance: state.cardBalance,
     mobileMoney: state.mobileMoney, score: state.score, busy: state.busy,
+    order: state.order, orderBubbleHidden: orderBubble.classList.contains('hidden'),
+    logoVisible: !!document.getElementById('logo'),
 });

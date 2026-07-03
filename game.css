@@ -462,3 +462,100 @@ html, body {
 }
 
 #modalBtn:active { transform: translateY(3px); box-shadow: 0 2px 0 #15803d; }
+
+/* ---------- Logo / identité ---------- */
+.logo {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 8px) + 4px);
+    left: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #7b3f00, #4a2600);
+    border: 2px solid #f5b301;
+    border-radius: 14px;
+    padding: 6px 12px 6px 8px;
+    box-shadow: 0 5px 14px rgba(0, 0, 0, 0.4);
+    z-index: 13;
+}
+
+.logo-emoji {
+    font-size: 26px;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.logo-txt { display: flex; flex-direction: column; line-height: 1.05; }
+
+.logo-name {
+    font-size: 20px;
+    font-weight: 900;
+    color: #f5b301;
+    letter-spacing: 0.5px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.logo-tag {
+    font-size: 9px;
+    font-weight: 700;
+    color: #ffe9b0;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+/* ---------- Bulle commande exportateur ---------- */
+.order-bubble {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    background: #fff;
+    border: 3px solid #f59e0b;
+    border-radius: 14px;
+    padding: 6px 12px;
+    text-align: center;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+    z-index: 11;
+    white-space: nowrap;
+    transition: opacity 0.2s ease;
+}
+
+.order-bubble::after {
+    content: "";
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+    border-top: 10px solid #f59e0b;
+}
+
+.order-bubble.hidden { opacity: 0; pointer-events: none; }
+.ob-title { font-size: 12px; font-weight: 800; color: #b45309; }
+.ob-body { font-size: 14px; font-weight: 800; color: #1f2937; font-variant-numeric: tabular-nums; }
+.order-bubble.done .ob-body { color: #16a34a; }
+
+/* ---------- Start screen logo ---------- */
+.start-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.start-emoji { font-size: 52px; }
+.start-logo-txt { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.05; }
+
+.start-name {
+    font-size: 42px;
+    font-weight: 900;
+    color: #7b3f00;
+    letter-spacing: 0.5px;
+}
+
+.start-tag {
+    font-size: 13px;
+    font-weight: 800;
+    color: #b45309;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
