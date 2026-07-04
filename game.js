@@ -15,6 +15,7 @@ import * as THREE from 'three';
 
 /* ---------- Constantes ---------- */
 const OFFICIAL_PRICE   = 1800;  // FCFA / kg — prix bord-champ officiel (paramétrable)
+const SIDE_PRICE       = 1400;  // FCFA / kg — pisteur informel (sous-paie, non tracé)
 const SACK_KG          = 65;    // kg par sac de jute (pour le nombre de scellés)
 const HARVEST_MIN_KG   = 6;     // kg de fèves séchées par cabosse récoltée (min)
 const HARVEST_MAX_KG   = 10;    // kg (max)
@@ -41,6 +42,9 @@ const state = {
     score: 0,              // score de traçabilité
     firstSaleDone: false,
     busy: false,           // séquence de vente en cours
+    level: 1,              // niveau du producteur
+    xp: 0,                 // XP dans le niveau courant (gagnée uniquement en tracé)
+    soldInformal: false,   // a déjà vendu au pisteur informel
 };
 
 /* ---------- Scène ---------- */
@@ -93,10 +97,31 @@ sun.shadow.camera.top = sc; sun.shadow.camera.bottom = -sc;
 sun.shadow.bias = -0.0005;
 scene.add(sun);
 
-/* ---------- Sol ---------- */
+/* ---------- Sol (texture herbe générée) ---------- */
+function makeGrassTexture() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const x = c.getContext('2d');
+    x.fillStyle = '#7ec850'; x.fillRect(0, 0, 256, 256);
+    // Taches d'herbe (nuances)
+    for (let i = 0; i < 2600; i++) {
+        const g = 150 + Math.floor(Math.random() * 90);
+        x.fillStyle = `rgb(${Math.floor(g * 0.45)},${g},${Math.floor(g * 0.35)})`;
+        x.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1 + Math.random() * 2);
+    }
+    // Quelques fleurs
+    for (let i = 0; i < 40; i++) {
+        x.fillStyle = ['#fde047', '#fef3c7', '#fca5a5', '#ffffff'][Math.floor(Math.random() * 4)];
+        x.beginPath(); x.arc(Math.random() * 256, Math.random() * 256, 1.6, 0, 7); x.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(10, 10);
+    return tex;
+}
 const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(120, 120),
-    new THREE.MeshStandardMaterial({ color: 0x7ec850, roughness: 1 }));
+    new THREE.MeshStandardMaterial({ map: makeGrassTexture(), color: 0xdfeecb, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
@@ -297,6 +322,71 @@ const truckBaseY = truck.position.y;
 scene.add(truck);
 let truckPop = 0;
 
+/* ---------- Personnage générique (PNJ) ---------- */
+function makeNPC(x, z, shirtColor, hatColor, rotY = 0) {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z); g.rotation.y = rotY;
+    const sMat = new THREE.MeshStandardMaterial({ color: shirtColor });
+    const t = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.58, 4, 8), sMat);
+    t.position.y = 1.1; t.castShadow = true; g.add(t);
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.31, 12, 12),
+        new THREE.MeshStandardMaterial({ color: 0x8d5524 }));
+    h.position.y = 1.82; h.castShadow = true; g.add(h);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.11, 12),
+        new THREE.MeshStandardMaterial({ color: hatColor }));
+    cap.position.y = 2.04; g.add(cap);
+    const pMat = new THREE.MeshStandardMaterial({ color: 0x374151 });
+    [-0.15, 0.15].forEach(px => {
+        const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.48, 4, 6), pMat);
+        leg.position.set(px, 0.48, 0); leg.castShadow = true; g.add(leg);
+    });
+    scene.add(g);
+    return g;
+}
+// Agent de la coopérative, derrière le comptoir
+makeNPC(9, 8.6, 0x0ea5e9, 0x1e3a8a, Math.PI);
+
+/* ---------- Pisteur informel (le mauvais choix) ---------- */
+function makeSideBuyer(x, z) {
+    const g = new THREE.Group(); g.position.set(x, 0, z);
+    // Vieille caisse + billets (cash)
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1, 1),
+        new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 1 }));
+    crate.position.y = 0.5; crate.castShadow = true; g.add(crate);
+    const cash = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.3),
+        new THREE.MeshStandardMaterial({ color: 0x16a34a }));
+    cash.position.set(0, 1.06, 0); g.add(cash);
+    const sign = makeSign('Pisteur', '#78350f');
+    sign.position.set(0, 2.2, 0); g.add(sign);
+    scene.add(g);
+    makeNPC(x + 0.9, z, 0x713f12, 0x3f2d0e); // vendeur à l'allure douteuse
+    stations.push({ type: 'sidebuyer', group: g, position: g.position });
+}
+makeSideBuyer(16, -1);
+
+/* ---------- Props d'ambiance ---------- */
+function makeRock(x, z, s) {
+    const r = new THREE.Mesh(new THREE.DodecahedronGeometry(s),
+        new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 1, flatShading: true }));
+    r.position.set(x, s * 0.4, z); r.rotation.set(Math.random(), Math.random(), Math.random());
+    r.castShadow = true; scene.add(r);
+}
+function makeGrassTuft(x, z) {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.6, 5),
+        new THREE.MeshStandardMaterial({ color: 0x4d9e3a }));
+    m.position.set(x, 0.3, z); scene.add(m);
+}
+[[6, 2, 0.5], [-2, 8, 0.4], [13, 3, 0.35], [-4, -2, 0.55], [4, -14, 0.4], [18, 6, 0.5]]
+    .forEach(([x, z, s]) => makeRock(x, z, s));
+for (let i = 0; i < 22; i++)
+    makeGrassTuft(-22 + Math.random() * 40, -22 + Math.random() * 36);
+
+// Petit plan d'eau (mare) dans un coin
+const pond = new THREE.Mesh(new THREE.CircleGeometry(4.5, 24),
+    new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.3, metalness: 0.1 }));
+pond.rotation.x = -Math.PI / 2; pond.position.set(-2, 0.06, 10); pond.receiveShadow = true;
+scene.add(pond);
+
 /* ---------- Personnage ---------- */
 const player = new THREE.Group();
 player.position.set(2, 0, 4);
@@ -315,6 +405,13 @@ const legL = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.5, 4, 6), pantsMat
 legL.position.set(-0.16, 0.5, 0); legL.castShadow = true; player.add(legL);
 const legR = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.5, 4, 6), pantsMat);
 legR.position.set(0.16, 0.5, 0); legR.castShadow = true; player.add(legR);
+// Bras (pivotent avec la marche)
+const armL = new THREE.Group(); armL.position.set(-0.42, 1.35, 0); player.add(armL);
+const armLMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.45, 4, 6), shirtMat);
+armLMesh.position.y = -0.28; armLMesh.castShadow = true; armL.add(armLMesh);
+const armR = new THREE.Group(); armR.position.set(0.42, 1.35, 0); player.add(armR);
+const armRMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.45, 4, 6), shirtMat);
+armRMesh.position.y = -0.28; armRMesh.castShadow = true; armR.add(armRMesh);
 
 /* ---------- Contrôles ---------- */
 const input = { x: 0, y: 0 };
@@ -380,6 +477,8 @@ function updateNearestInteraction() {
             if (st.type === 'ccc') {
                 label = !state.hasCard ? '💳 Retirer ma Carte'
                     : (state.cardBalance > 0 ? '📱 Cash-out Mobile Money' : 'ℹ️ Services CCC');
+            } else if (st.type === 'sidebuyer') {
+                label = `💵 Vendre au pisteur (${SIDE_PRICE}/kg)`;
             } else { // coop
                 label = '🤝 Vente tracée';
             }
@@ -396,6 +495,60 @@ function doAction() {
     if (currentInteraction.kind === 'tree') harvestFrom(currentInteraction.ref);
     else if (currentInteraction.kind === 'ccc') cccAction();
     else if (currentInteraction.kind === 'coop') tracedSale();
+    else if (currentInteraction.kind === 'sidebuyer') sideBuyerSale();
+}
+
+/* ---------- Vente au pisteur informel (non tracée) ---------- */
+function sideBuyerSale() {
+    if (state.cacaoKg <= 0) {
+        sfx.error();
+        floaty('Rien à vendre', 0x6b7280);
+        return;
+    }
+    const kg = state.cacaoKg;
+    const amount = kg * SIDE_PRICE;
+    const manque = kg * (OFFICIAL_PRICE - SIDE_PRICE); // manque à gagner vs prix officiel
+    state.cacaoKg = 0;
+    state.mobileMoney += amount;      // cash immédiat, pas via la Carte
+    updateHUD(); sfx.coin();
+    floaty(`+${formatFCFA(amount, false)} · non tracé ⚠️`, 0xdc2626);
+    // Pas d'XP, pas de score, ne compte pas pour l'exportateur.
+    if (!state.soldInformal) {
+        state.soldInformal = true;
+        showInfo('⚠️', 'Vente informelle (pisteur)',
+            `Le pisteur t'a payé ${formatFCFA(amount)} en cash, soit ${formatFCFA(manque)} de moins ` +
+            "que le prix officiel garanti. Surtout, ce cacao n'est ni tracé ni « zéro déforestation » : " +
+            "il ne peut pas être exporté vers l'UE (EUDR), ne compte pas pour l'exportateur, ne rapporte " +
+            "aucune progression, et prive la filière de traçabilité. La vente tracée à la coopérative " +
+            "paie plus et ouvre les primes d'exportation.");
+    }
+}
+
+/* ---------- Progression : XP & niveau ---------- */
+const levelBadge = document.getElementById('levelBadge');
+const levelText = document.getElementById('levelText');
+const xpFill = document.getElementById('xpFill');
+function xpNeeded(level) { return 100 + level * 50; }
+function addXp(n) {
+    state.xp += n;
+    while (state.xp >= xpNeeded(state.level)) {
+        state.xp -= xpNeeded(state.level);
+        state.level++;
+        onLevelUp();
+    }
+    updateLevelBadge();
+}
+function onLevelUp() {
+    const bonus = state.level * 10000;
+    state.cardBalance += bonus;
+    addScore(15);
+    sfx.success();
+    floaty(`⭐ Niveau ${state.level} ! +${formatFCFA(bonus, false)}`, 0xf5b301);
+}
+function updateLevelBadge() {
+    levelBadge.classList.remove('hidden');
+    levelText.textContent = `Producteur · Niveau ${state.level}`;
+    xpFill.style.width = Math.min(100, (state.xp / xpNeeded(state.level)) * 100) + '%';
 }
 
 /* ---------- Récolte ---------- */
@@ -407,6 +560,7 @@ function harvestFrom(tree) {
     pod.ripe = false; pod.mesh.visible = false; pod.regrowAt = clockTime + 6;
     const kg = Math.round(HARVEST_MIN_KG + Math.random() * (HARVEST_MAX_KG - HARVEST_MIN_KG));
     state.cacaoKg += kg;
+    addXp(2);
     updateHUD();
     floaty(`+${kg} kg 🍫`, 0x7b3f00);
     if (state.step === 3) {
@@ -505,6 +659,7 @@ async function tracedSale() {
     state.cacaoKg = 0;
     state.cardBalance += amount;
     addScore(20);
+    addXp(kg);
     addTracedToOrder(kg);
     updateHUD();
     saleResult.textContent = `✅ Vente tracée : +${formatFCFA(amount)}`;
@@ -656,9 +811,10 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
 /* ---------- Audio (WebAudio, autonome) ---------- */
 let actx = null;
+let muted = false;
 function initAudio() { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* silencieux */ } }
 function beep(freq, dur = 0.12, type = 'sine', vol = 0.2, when = 0) {
-    if (!actx) return;
+    if (!actx || muted) return;
     const t = actx.currentTime + when;
     const o = actx.createOscillator(), g = actx.createGain();
     o.type = type; o.frequency.value = freq;
@@ -676,6 +832,23 @@ const sfx = {
     error: () => beep(150, 0.25, 'sawtooth', 0.16),
     tick: () => beep(560, 0.05, 'sine', 0.07),
 };
+
+/* Musique d'ambiance procédurale (boucle douce, pentatonique) */
+let musicTimer = null;
+const MELODY = [0, 3, 5, 7, 10, 7, 5, 3, 0, 5, 7, 10]; // demi-tons depuis la base
+function startMusic() {
+    if (!actx || musicTimer) return;
+    let i = 0;
+    const base = 196; // Sol grave
+    musicTimer = setInterval(() => {
+        if (muted) return;
+        const semis = MELODY[i % MELODY.length];
+        const f = base * Math.pow(2, semis / 12);
+        beep(f, 0.7, 'sine', 0.05);            // mélodie douce
+        if (i % 4 === 0) beep(f / 2, 1.6, 'triangle', 0.035); // basse
+        i++;
+    }, 500);
+}
 
 /* ---------- Fèves volantes (juice de récolte) ---------- */
 const flyers = [];
@@ -751,6 +924,7 @@ function completeOrder() {
     const bonus = 50000;
     state.cardBalance += bonus;
     addScore(40);
+    addXp(60);
     sfx.success();
     truckPop = 1;
     orderBubble.classList.add('done');
@@ -792,9 +966,12 @@ function animate() {
         walkPhase += dt * 12;
         legL.rotation.x = Math.sin(walkPhase) * 0.6;
         legR.rotation.x = -Math.sin(walkPhase) * 0.6;
+        armL.rotation.x = -Math.sin(walkPhase) * 0.5;
+        armR.rotation.x = Math.sin(walkPhase) * 0.5;
         torso.position.y = 1.1 + Math.abs(Math.sin(walkPhase)) * 0.05;
     } else {
         legL.rotation.x *= 0.8; legR.rotation.x *= 0.8;
+        armL.rotation.x *= 0.8; armR.rotation.x *= 0.8;
     }
 
     // Capture des bornes (géolocalisation) par proximité
@@ -873,9 +1050,18 @@ animate();
 const startScreen = document.getElementById('startScreen');
 document.getElementById('startBtn').addEventListener('click', () => {
     initAudio();
+    startMusic();
     state.started = true;
     startScreen.classList.add('hidden');
-    updateHUD(); updateObjective();
+    updateHUD(); updateObjective(); updateLevelBadge();
+});
+
+// Bouton son / musique
+const soundBtn = document.getElementById('soundBtn');
+soundBtn.addEventListener('click', () => {
+    muted = !muted;
+    soundBtn.textContent = muted ? '🔇' : '🔊';
+    if (!muted && !actx) { initAudio(); startMusic(); }
 });
 updateHUD(); updateObjective();
 
@@ -888,4 +1074,5 @@ window.__dbg = () => ({
     mobileMoney: state.mobileMoney, score: state.score, busy: state.busy,
     order: state.order, orderBubbleHidden: orderBubble.classList.contains('hidden'),
     logoVisible: !!document.getElementById('logo'),
+    level: state.level, xp: state.xp, soldInformal: state.soldInformal, muted,
 });
